@@ -1331,24 +1331,6 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
      * than or equal to the given key, or null if there is no such key.
      */
     TrieEntry<K, V> ceilingEntry(final K key) {
-        // Basically:
-        // Follow the steps of adding an entry, but instead...
-        //
-        // - If we ever encounter a situation where we found an equal
-        //   key, we return it immediately.
-        //
-        // - If we hit an empty root, return the first iterable item.
-        //
-        // - If we have to add a new item, we temporarily add it,
-        //   find the successor to it, then remove the added item.
-        //
-        // These steps ensure that the returned value is either the
-        // entry for the key itself, or the first entry directly after
-        // the key.
-
-        // TODO: Cleanup so that we don't actually have to add/remove from the
-        //       tree.  (We do it here because there are other well-defined
-        //       functions to perform the search.)
         final int lengthInBits = lengthInBits(key);
 
         if (lengthInBits == 0) {
@@ -1365,14 +1347,26 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
 
         final int bitIndex = bitIndex(key, found.key);
         if (KeyAnalyzer.isValidBitIndex(bitIndex)) {
-            final TrieEntry<K, V> added = new TrieEntry<>(key, null, bitIndex);
-            addEntry(added, lengthInBits);
-            incrementSize(); // must increment because remove will decrement
-            final TrieEntry<K, V> ceil = nextEntry(added);
-            removeEntry(added);
-            modCount -= 2; // we didn't really modify it.
-            return ceil;
+            if (!isBitSet(key, bitIndex, lengthInBits)) {
+                // this means key < found
+                // found is a ceiling candidate; walk backward to find the smallest entry still >= key
+                TrieEntry<K, V> ceiling = found;
+                TrieEntry<K, V> prev = previousEntry(found);
+                while (prev != null && !prev.isEmpty() && getKeyAnalyzer().compare(key, prev.key) <= 0) {
+                    ceiling = prev;
+                    prev = previousEntry(prev);
+                }
+                return ceiling;
+            }
+            // this means key > found
+            // walk forward to find the first entry > key
+            TrieEntry<K, V> next = nextEntry(found);
+            while (next != null && getKeyAnalyzer().compare(key, next.key) > 0) {
+                next = nextEntry(next);
+            }
+            return next;
         }
+
         if (KeyAnalyzer.isNullBitKey(bitIndex)) {
             if (!root.isEmpty()) {
                 return root;
@@ -1463,9 +1457,6 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
      * less than or equal to the given key, or null if there is no such key.
      */
     TrieEntry<K, V> floorEntry(final K key) {
-        // TODO: Cleanup so that we don't actually have to add/remove from the
-        //       tree.  (We do it here because there are other well-defined
-        //       functions to perform the search.)
         final int lengthInBits = lengthInBits(key);
 
         if (lengthInBits == 0) {
@@ -1482,13 +1473,24 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
 
         final int bitIndex = bitIndex(key, found.key);
         if (KeyAnalyzer.isValidBitIndex(bitIndex)) {
-            final TrieEntry<K, V> added = new TrieEntry<>(key, null, bitIndex);
-            addEntry(added, lengthInBits);
-            incrementSize(); // must increment because remove will decrement
-            final TrieEntry<K, V> floor = previousEntry(added);
-            removeEntry(added);
-            modCount -= 2; // we didn't really modify it.
-            return floor;
+            if (isBitSet(key, bitIndex, lengthInBits)) {
+                TrieEntry<K, V> floor = found;
+                TrieEntry<K, V> next = nextEntry(found);
+                while (next != null && getKeyAnalyzer().compare(key, next.key) >= 0) {
+                    floor = next;
+                    next = nextEntry(next);
+                }
+                return floor;
+            }
+            TrieEntry<K, V> prev = previousEntry(found);
+            while (prev != null && !prev.isEmpty()
+                    && getKeyAnalyzer().compare(key, prev.key) < 0) {
+                prev = previousEntry(prev);
+            }
+            if (prev == null || prev.isEmpty()) {
+                return null;
+            }
+            return prev;
         }
         if (KeyAnalyzer.isNullBitKey(bitIndex)) {
             if (!root.isEmpty()) {
@@ -1632,14 +1634,10 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
      * or null if no such entry exists.
      */
     TrieEntry<K, V> higherEntry(final K key) {
-        // TODO: Cleanup so that we don't actually have to add/remove from the
-        //       tree.  (We do it here because there are other well-defined
-        //       functions to perform the search.)
         final int lengthInBits = lengthInBits(key);
 
         if (lengthInBits == 0) {
             if (!root.isEmpty()) {
-                // If data in root, and more after -- return it.
                 if (size() > 1) {
                     return nextEntry(root);
                 }
@@ -1657,13 +1655,22 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
 
         final int bitIndex = bitIndex(key, found.key);
         if (KeyAnalyzer.isValidBitIndex(bitIndex)) {
-            final TrieEntry<K, V> added = new TrieEntry<>(key, null, bitIndex);
-            addEntry(added, lengthInBits);
-            incrementSize(); // must increment because remove will decrement
-            final TrieEntry<K, V> ceil = nextEntry(added);
-            removeEntry(added);
-            modCount -= 2; // we didn't really modify it.
-            return ceil;
+            if (!isBitSet(key, bitIndex, lengthInBits)) {
+                TrieEntry<K, V> ceiling = found;
+                TrieEntry<K, V> prev = previousEntry(found);
+                while (prev != null && !prev.isEmpty()
+                        && getKeyAnalyzer().compare(key, prev.key) <= 0) {
+                    ceiling = prev;
+                    prev = previousEntry(prev);
+                }
+                return ceiling;
+            }
+            // key has bit 1, found has bit 0 at bitIndex -> key > found
+            TrieEntry<K, V> next = nextEntry(found);
+            while (next != null && getKeyAnalyzer().compare(key, next.key) > 0) {
+                next = nextEntry(next);
+            }
+            return next;
         }
         if (KeyAnalyzer.isNullBitKey(bitIndex)) {
             if (!root.isEmpty()) {
@@ -1729,23 +1736,6 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
      * strictly less than the given key, or null if there is no such key.
      */
     TrieEntry<K, V> lowerEntry(final K key) {
-        // Basically:
-        // Follow the steps of adding an entry, but instead...
-        //
-        // - If we ever encounter a situation where we found an equal
-        //   key, we return it's previousEntry immediately.
-        //
-        // - If we hit root (empty or not), return null.
-        //
-        // - If we have to add a new item, we temporarily add it,
-        //   find the previousEntry to it, then remove the added item.
-        //
-        // These steps ensure that the returned value is always just before
-        // the key or null (if there was nothing before it).
-
-        // TODO: Cleanup so that we don't actually have to add/remove from the
-        //       tree.  (We do it here because there are other well-defined
-        //       functions to perform the search.)
         final int lengthInBits = lengthInBits(key);
 
         if (lengthInBits == 0) {
@@ -1759,13 +1749,25 @@ public abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, 
 
         final int bitIndex = bitIndex(key, found.key);
         if (KeyAnalyzer.isValidBitIndex(bitIndex)) {
-            final TrieEntry<K, V> added = new TrieEntry<>(key, null, bitIndex);
-            addEntry(added, lengthInBits);
-            incrementSize(); // must increment because remove will decrement
-            final TrieEntry<K, V> prior = previousEntry(added);
-            removeEntry(added);
-            modCount -= 2; // we didn't really modify it.
-            return prior;
+            if (isBitSet(key, bitIndex, lengthInBits)) {
+                TrieEntry<K, V> floor = found;
+                TrieEntry<K, V> next = nextEntry(found);
+                while (next != null && getKeyAnalyzer().compare(key, next.key) >= 0) {
+                    floor = next;
+                    next = nextEntry(next);
+                }
+                return floor;
+            }
+
+            TrieEntry<K, V> prev = previousEntry(found);
+            while (prev != null && !prev.isEmpty()
+                    && getKeyAnalyzer().compare(key, prev.key) < 0) {
+                prev = previousEntry(prev);
+            }
+            if (prev == null || prev.isEmpty()) {
+                return null;
+            }
+            return prev;
         }
         if (KeyAnalyzer.isNullBitKey(bitIndex)) {
             return null;
